@@ -15,8 +15,8 @@ Obsidian’s built-in Daily Notes feature normally looks for an exact filename s
 This plugin also recognizes descriptive filenames that start with the same date, for example:
 
 ```text
-2026-07-28火 知识大整理.md
-2026-07-28读书笔记.md
+2026-07-28 Tuesday knowledge review.md
+2026-07-28 reading notes.md
 ```
 
 ### Features
@@ -26,7 +26,9 @@ This plugin also recognizes descriptive filenames that start with the same date,
 - Prefer a descriptive note over an empty exact-date placeholder.
 - Show a picker when multiple descriptive notes match.
 - Create the standard exact-date note when no matching note exists.
-- Keep the configured Daily Notes folder and date format.
+- Keep the configured Daily Notes folder and date format when the core Daily Notes plugin is enabled.
+- When the core Daily Notes plugin is disabled, use a configurable fallback folder initialized from the core Daily Notes folder and the `YYYY-MM-DD` date format.
+- Switch user-visible UI text between Chinese and English based on Obsidian’s interface language.
 - Provide both a ribbon icon and a Command Palette command.
 
 ### Usage
@@ -35,11 +37,11 @@ This plugin also recognizes descriptive filenames that start with the same date,
 2. Click the calendar icon in the left ribbon, or open the Command Palette.
 3. Run **Open today's daily note by prefix**.
 
-The plugin reads the folder and date format from Obsidian’s core Daily Notes settings. For example:
+When Obsidian’s core Daily Notes plugin is enabled, the plugin reads the folder and date format from its settings. If it is disabled, configure the fallback folder in **Settings → Daily Notes Prefix Matcher**. It is initialized from the core Daily Notes folder when available, can be changed to any folder in your vault, and uses `YYYY-MM-DD`. For example:
 
 ```json
 {
-  "folder": "Life/日记",
+  "folder": "life/日记",
   "format": "YYYY-MM-DD"
 }
 ```
@@ -50,7 +52,7 @@ If the folder contains:
 
 ```text
 2026-07-28.md
-2026-07-28火 知识大整理.md
+2026-07-28 Tuesday knowledge review.md
 ```
 
 the descriptive note is preferred. If there are several descriptive notes, the plugin lets you choose one. If no file starts with today’s date, it creates the standard `YYYY-MM-DD.md` note.
@@ -106,7 +108,9 @@ Obsidian 自带的 Daily Notes 通常只会精确查找：
 - 如果同时存在标准日期文件和带标题的日记，优先打开带标题的日记。
 - 存在多篇带标题的当天日记时，弹出选择列表。
 - 找不到匹配文件时，创建标准的日期文件。
-- 沿用 Obsidian 核心 Daily Notes 的日记目录和日期格式。
+- 核心 Daily Notes 插件开启时，沿用其日记目录和日期格式。
+- 核心 Daily Notes 插件关闭时，使用插件设置中的备用日记位置；如果能读取核心 Daily Notes 的目录，就用该目录初始化，也可以自定义为 Vault 内的其他目录；日期格式固定为 `YYYY-MM-DD`。
+- 根据 Obsidian 界面语言切换插件的中英文界面文案。
 - 提供左侧功能条按钮和命令面板命令。
 
 ### 使用方法
@@ -115,7 +119,7 @@ Obsidian 自带的 Daily Notes 通常只会精确查找：
 2. 点击左侧功能条中的日历图标，或打开命令面板。
 3. 执行 **打开今天的日记（按日期前缀匹配）**。
 
-插件会读取 Obsidian 核心 Daily Notes 的目录和日期格式。例如：
+核心 Daily Notes 插件开启时，插件会读取其目录和日期格式；关闭时，请在 **设置 → 日记前缀匹配设置** 中配置备用日记位置。例如：
 
 ```json
 {
