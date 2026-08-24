@@ -9,6 +9,7 @@ const {
 
 const DEFAULT_DAILY_NOTE_FOLDER = 'life/日记';
 const FALLBACK_DATE_FORMAT = 'YYYY-MM-DD';
+const DEFAULT_FOLLOW_CORE_DAILY_NOTES = true;
 
 function isChineseLocale(app) {
   const locale = app?.vault?.getConfig?.('locale') || window.moment?.locale?.() || '';
@@ -42,15 +43,35 @@ class DailyPrefixNotesSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.createEl('h2', { text: t(this.app, '日记前缀匹配设置', 'Daily Notes Prefix Matcher') });
     new Setting(containerEl)
-      .setName(t(this.app, '备用日记位置', 'Fallback daily-note folder'))
-      .setDesc(t(this.app, '仅当核心插件“日记”关闭时使用；可以自定义为 Vault 内的其他目录。', 'Used only when Obsidian’s core Daily Notes plugin is disabled. You can choose any folder in your vault.'))
+      .setName(t(this.app, '跟随核心日记路径', 'Follow core Daily Notes path'))
+      .setDesc(t(this.app, '开启后自动读取核心“日记”的目录和日期格式；关闭后使用下方自定义路径。', 'Use the core Daily Notes folder and date format when enabled; use the custom path below when disabled.'))
+      .addToggle((toggle) => toggle
+        .setValue(this.plugin.settings.followCoreDailyNotes)
+        .onChange(async (value) => {
+          this.plugin.settings.followCoreDailyNotes = value;
+          await this.plugin.saveData(this.plugin.settings);
+          this.display();
+        }));
+
+    const active = this.plugin.getDailyNotesOptions();
+    const activePath = normalizePath(`${active.folder === '/' ? '' : `${active.folder}/`}${window.moment().format(active.format)}.md`);
+    new Setting(containerEl)
+      .setName(t(this.app, '当前生效路径', 'Resolved daily-note path'))
+      .setDesc(t(this.app, '当天实际匹配的目录和标准文件路径。', 'The folder and standard file path currently used for today.'))
+      .addText((text) => text.setValue(activePath).setDisabled(true));
+
+    new Setting(containerEl)
+      .setName(t(this.app, '自定义日记路径', 'Custom daily-note path'))
+      .setDesc(t(this.app, '关闭“跟随核心日记路径”时使用。支持路径中的 YYYY、MM、DD，例如 Life/日记/YYYY 年日记/MM月。只匹配解析后最后一级目录下的文件。', 'Used when following is disabled. Supports YYYY, MM, and DD in the path, for example Life/日记/YYYY 年日记/MM月. Only files directly under the resolved final folder are matched.'))
       .addText((text) => text
         .setPlaceholder(DEFAULT_DAILY_NOTE_FOLDER)
         .setValue(this.plugin.settings.dailyNoteFolder)
+        .setDisabled(this.plugin.settings.followCoreDailyNotes)
         .onChange(async (value) => {
           const nextFolder = normalizePath(value.trim()) || DEFAULT_DAILY_NOTE_FOLDER;
           this.plugin.settings.dailyNoteFolder = nextFolder;
           await this.plugin.saveData(this.plugin.settings);
+          this.display();
         }));
   }
 }
@@ -64,7 +85,8 @@ module.exports = class DailyPrefixNotesPlugin extends Plugin {
       ? (coreOptions.folder || DEFAULT_DAILY_NOTE_FOLDER)
       : savedFolder;
     this.settings = {
-      dailyNoteFolder: normalizePath(initialFolder),
+      followCoreDailyNotes: savedSettings?.followCoreDailyNotes ?? DEFAULT_FOLLOW_CORE_DAILY_NOTES,
+      dailyNoteFolder: normalizePath(savedSettings?.dailyNoteFolder || initialFolder),
     };
     if (this.settings.dailyNoteFolder && this.settings.dailyNoteFolder !== savedFolder) {
       await this.saveData(this.settings);
@@ -85,16 +107,35 @@ module.exports = class DailyPrefixNotesPlugin extends Plugin {
     return plugin?.instance?.options || plugin?.instance?.settings || {};
   }
 
+  resolveDatePath(path, date) {
+    return normalizePath(String(path || DEFAULT_DAILY_NOTE_FOLDER)
+      .replace(/YYYY/g, date.format('YYYY'))
+      .replace(/MM/g, date.format('MM'))
+      .replace(/DD/g, date.format('DD')));
+  }
+
   getDailyNotesOptions() {
     const plugin = this.app.internalPlugins?.getPluginById('daily-notes');
     const coreEnabled = plugin?.enabled === true;
     const options = this.getCoreDailyNotesOptions();
-    if (!coreEnabled) {
-      return { folder: this.settings.dailyNoteFolder || DEFAULT_DAILY_NOTE_FOLDER, format: FALLBACK_DATE_FORMAT };
+    const date = window.moment();
+    if (this.settings.followCoreDailyNotes && coreEnabled) {
+      // Obsidian's Daily Notes format may itself contain folders, e.g.
+      // "YYYY 年日记/MM月/YYYY-MM-DD". The final segment is the filename
+      // format; preceding segments are date-dependent subfolders.
+      const renderedFormat = this.resolveDatePath(options.format || FALLBACK_DATE_FORMAT, date);
+      const separator = renderedFormat.lastIndexOf('/');
+      const relativeFolder = separator >= 0 ? renderedFormat.slice(0, separator) : '';
+      const fileFormat = separator >= 0 ? renderedFormat.slice(separator + 1) : renderedFormat;
+      const baseFolder = this.resolveDatePath(options.folder || '', date);
+      return {
+        folder: normalizePath([baseFolder, relativeFolder].filter(Boolean).join('/')) || '/',
+        format: fileFormat || FALLBACK_DATE_FORMAT,
+      };
     }
     return {
-      folder: options.folder || DEFAULT_DAILY_NOTE_FOLDER,
-      format: options.format || FALLBACK_DATE_FORMAT,
+      folder: this.resolveDatePath(this.settings.dailyNoteFolder || DEFAULT_DAILY_NOTE_FOLDER, date),
+      format: FALLBACK_DATE_FORMAT,
     };
   }
 
@@ -119,6 +160,9 @@ module.exports = class DailyPrefixNotesPlugin extends Plugin {
     const normalizedFolder = normalizePath(folder || '/');
     const folderPrefix = normalizedFolder === '/' ? '' : `${normalizedFolder}/`;
 
+    // The resolved folder is the final directory for today's notes. Match
+    // only files directly below it, so older year/month folders do not leak
+    // into today's result.
     const matches = this.app.vault.getMarkdownFiles()
       .filter((file) => file.path.startsWith(folderPrefix))
       .filter((file) => !file.path.slice(folderPrefix.length).includes('/'))
@@ -144,7 +188,24 @@ module.exports = class DailyPrefixNotesPlugin extends Plugin {
     const path = normalizePath(`${folderPrefix}${prefix}.md`);
     try {
       if (folderPrefix) await this.ensureFolder(normalizedFolder);
-      const file = await this.app.vault.create(path, '');
+
+      // Re-check after folder creation: another plugin may have created the
+      // note while we were preparing the folder tree.
+      const existing = this.app.vault.getAbstractFileByPath(path);
+      if (existing) {
+        await this.openFile(existing);
+        return;
+      }
+
+      let file;
+      try {
+        file = await this.app.vault.create(path, '');
+      } catch (error) {
+        // Treat a create race as success if the other creator left the file.
+        const raced = this.app.vault.getAbstractFileByPath(path);
+        if (!raced) throw error;
+        file = raced;
+      }
       await this.openFile(file);
     } catch (error) {
       new Notice(t(this.app, `无法创建今日日记：${error.message}`, `Unable to create today's daily note: ${error.message}`));
