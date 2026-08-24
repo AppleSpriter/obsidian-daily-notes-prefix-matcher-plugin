@@ -12,8 +12,14 @@ const FALLBACK_DATE_FORMAT = 'YYYY-MM-DD';
 const DEFAULT_FOLLOW_CORE_DAILY_NOTES = true;
 
 function isChineseLocale(app) {
-  const locale = app?.vault?.getConfig?.('locale') || window.moment?.locale?.() || '';
-  return String(locale).toLowerCase().startsWith('zh');
+  const locales = [
+    app?.vault?.getConfig?.('locale'),
+    app?.locale,
+    window.moment?.locale?.(),
+    document?.documentElement?.lang,
+    navigator?.language,
+  ].filter(Boolean).map((locale) => String(locale).toLowerCase());
+  return locales.some((locale) => locale === 'zh' || locale.startsWith('zh-') || locale.startsWith('zh_'));
 }
 
 function t(app, chinese, english) {
@@ -64,7 +70,7 @@ class DailyPrefixNotesSettingTab extends PluginSettingTab {
       .setName(t(this.app, '自定义日记路径', 'Custom daily-note path'))
       .setDesc(t(this.app, '关闭“跟随核心日记路径”时使用。支持路径中的 YYYY、MM、DD，例如 Life/日记/YYYY 年日记/MM月。只匹配解析后最后一级目录下的文件。', 'Used when following is disabled. Supports YYYY, MM, and DD in the path, for example Life/日记/YYYY 年日记/MM月. Only files directly under the resolved final folder are matched.'))
       .addText((text) => text
-        .setPlaceholder(DEFAULT_DAILY_NOTE_FOLDER)
+        .setPlaceholder(t(this.app, DEFAULT_DAILY_NOTE_FOLDER, 'Life/Daily Notes'))
         .setValue(this.plugin.settings.dailyNoteFolder)
         .setDisabled(this.plugin.settings.followCoreDailyNotes)
         .onChange(async (value) => {
