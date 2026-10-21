@@ -60,7 +60,7 @@ class DailyPrefixNotesSettingTab extends PluginSettingTab {
         }));
 
     const active = this.plugin.getDailyNotesOptions();
-    const activePath = normalizePath(`${active.folder === '/' ? '' : `${active.folder}/`}${window.moment().format(active.format)}.md`);
+    const activePath = normalizePath(`${active.folder === '/' ? '' : `${active.folder}/`}${active.prefix}.md`);
     new Setting(containerEl)
       .setName(t(this.app, '当前生效路径', 'Resolved daily-note path'))
       .setDesc(t(this.app, '当天实际匹配的目录和标准文件路径。', 'The folder and standard file path currently used for today.'))
@@ -68,7 +68,9 @@ class DailyPrefixNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName(t(this.app, '自定义日记路径', 'Custom daily-note path'))
-      .setDesc(t(this.app, '关闭“跟随核心日记路径”时使用。支持路径中的 YYYY、MM、DD，例如 Life/日记/YYYY 年日记/MM月。只匹配解析后最后一级目录下的文件。', 'Used when following is disabled. Supports YYYY, MM, and DD in the path, for example Life/日记/YYYY 年日记/MM月. Only files directly under the resolved final folder are matched.'))
+      .setDesc(t(this.app,
+        '关闭“跟随核心日记路径”时使用。花括号内支持任意 moment 格式，例如 Life/日记/{YYYY} 年日记/{MMMM}；花括号外也支持 YYYY、MMMM、MMM、MM、DD、dddd、ddd。只匹配解析后最后一级目录下的文件。',
+        'Used when following is disabled. Anything inside {} is a full moment format, e.g. Life/Daily/{YYYY}/{MMMM}. Outside braces, YYYY, MMMM, MMM, MM, DD, dddd and ddd are also replaced. Only files directly under the resolved final folder are matched.'))
       .addText((text) => text
         .setPlaceholder(t(this.app, DEFAULT_DAILY_NOTE_FOLDER, 'Life/Daily Notes'))
         .setValue(this.plugin.settings.dailyNoteFolder)
@@ -113,11 +115,15 @@ module.exports = class DailyPrefixNotesPlugin extends Plugin {
     return plugin?.instance?.options || plugin?.instance?.settings || {};
   }
 
+  // Custom path: "{...}" is passed to moment as a full format string.
+  // Outside braces only unambiguous tokens are replaced (so plain text such
+  // as "Daily Notes" is not mangled by moment's single-letter tokens).
   resolveDatePath(path, date) {
-    return normalizePath(String(path || DEFAULT_DAILY_NOTE_FOLDER)
-      .replace(/YYYY/g, date.format('YYYY'))
-      .replace(/MM/g, date.format('MM'))
-      .replace(/DD/g, date.format('DD')));
+    const resolved = String(path || DEFAULT_DAILY_NOTE_FOLDER).replace(
+      /\{([^}]*)\}|(YYYY|MMMM|MMM|MM|DD|dddd|ddd)/g,
+      (match, braced, token) => date.format(braced !== undefined ? braced : token),
+    );
+    return normalizePath(resolved);
   }
 
   getDailyNotesOptions() {
@@ -125,23 +131,28 @@ module.exports = class DailyPrefixNotesPlugin extends Plugin {
     const coreEnabled = plugin?.enabled === true;
     const options = this.getCoreDailyNotesOptions();
     const date = window.moment();
+
     if (this.settings.followCoreDailyNotes && coreEnabled) {
-      // Obsidian's Daily Notes format may itself contain folders, e.g.
-      // "YYYY 年日记/MM月/YYYY-MM-DD". The final segment is the filename
-      // format; preceding segments are date-dependent subfolders.
-      const renderedFormat = this.resolveDatePath(options.format || FALLBACK_DATE_FORMAT, date);
-      const separator = renderedFormat.lastIndexOf('/');
-      const relativeFolder = separator >= 0 ? renderedFormat.slice(0, separator) : '';
-      const fileFormat = separator >= 0 ? renderedFormat.slice(separator + 1) : renderedFormat;
+      // The core format is a real moment format and may contain folders,
+      // e.g. "YYYY 年日记/MMMM/YYYY-MM-DD". The last segment is the filename
+      // format; the preceding ones are date-dependent subfolders.
+      // Each part is formatted exactly once.
+      const rawFormat = options.format || FALLBACK_DATE_FORMAT;
+      const separator = rawFormat.lastIndexOf('/');
+      const folderFormat = separator >= 0 ? rawFormat.slice(0, separator) : '';
+      const fileFormat = separator >= 0 ? rawFormat.slice(separator + 1) : rawFormat;
+      const relativeFolder = folderFormat ? date.format(folderFormat) : '';
+      const prefix = date.format(fileFormat || FALLBACK_DATE_FORMAT);
       const baseFolder = this.resolveDatePath(options.folder || '', date);
       return {
         folder: normalizePath([baseFolder, relativeFolder].filter(Boolean).join('/')) || '/',
-        format: fileFormat || FALLBACK_DATE_FORMAT,
+        prefix,
       };
     }
+
     return {
       folder: this.resolveDatePath(this.settings.dailyNoteFolder || DEFAULT_DAILY_NOTE_FOLDER, date),
-      format: FALLBACK_DATE_FORMAT,
+      prefix: date.format(FALLBACK_DATE_FORMAT),
     };
   }
 
@@ -161,8 +172,7 @@ module.exports = class DailyPrefixNotesPlugin extends Plugin {
   }
 
   async openDailyNoteByPrefix() {
-    const { folder, format } = this.getDailyNotesOptions();
-    const prefix = window.moment().format(format);
+    const { folder, prefix } = this.getDailyNotesOptions();
     const normalizedFolder = normalizePath(folder || '/');
     const folderPrefix = normalizedFolder === '/' ? '' : `${normalizedFolder}/`;
 
